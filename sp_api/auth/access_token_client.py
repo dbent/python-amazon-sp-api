@@ -10,8 +10,6 @@ from .credentials import Credentials
 from .access_token_response import AccessTokenResponse
 from .exceptions import AuthorizationError
 
-cache = TTLCache(maxsize=int(os.environ.get('SP_API_AUTH_CACHE_SIZE', 10)), ttl=int(os.environ.get('SP_API_AUTH_CACHE_TTL', 3200)))
-grantless_cache = TTLCache(maxsize=int(os.environ.get('SP_API_AUTH_CACHE_SIZE', 10)), ttl=int(os.environ.get('SP_API_AUTH_CACHE_TTL', 3200)))
 
 logger = logging.getLogger(__name__)
 
@@ -20,11 +18,15 @@ class AccessTokenClient(BaseClient):
     host = 'api.amazon.com'
     grant_type = 'refresh_token'
     path = '/auth/o2/token'
+    cache: TTLCache
+    grantless_cache: TTLCache
 
     def __init__(self, refresh_token=None, credentials=None, proxies=None, verify=True):
         self.cred = Credentials(refresh_token, credentials)
         self.proxies = proxies
         self.verify = verify
+        self.cache = TTLCache(maxsize=int(os.environ.get('SP_API_AUTH_CACHE_SIZE', 10)), ttl=3200)
+        self.grantless_cache = TTLCache(maxsize=int(os.environ.get('SP_API_AUTH_CACHE_SIZE', 10)), ttl=3200)
 
     def _request(self, url, data, headers):
         response = requests.post(url, data=data, headers=headers, proxies=self.proxies, verify=self.verify)
@@ -43,11 +45,11 @@ class AccessTokenClient(BaseClient):
 
         cache_key = self._get_cache_key()
         try:
-            access_token = cache[cache_key]
+            access_token = self.cache[cache_key]
         except KeyError:
             request_url = self.scheme + self.host + self.path
             access_token = self._request(request_url, self.data, self.headers)
-            cache[cache_key] = access_token
+            self.cache[cache_key] = access_token
         return AccessTokenResponse(**access_token)
 
     def get_grantless_auth(self, scope='sellingpartnerapi::notifications'):
@@ -65,10 +67,9 @@ class AccessTokenClient(BaseClient):
         &client_secret=Y76SDl2F
         :return: AccessTokenResponse
         """
-        global grantless_cache
         cache_key = self._get_cache_key(scope)
         try:
-            access_token = grantless_cache[cache_key]
+            access_token = self.grantless_cache[cache_key]
             logger.debug('from_cache. scope: %s', scope)
         except KeyError:
             request_url = self.scheme + self.host + self.path
@@ -78,8 +79,8 @@ class AccessTokenClient(BaseClient):
                 headers=self.headers
             )
             logger.debug('token_refreshed')
-            grantless_cache.clear()
-            grantless_cache[cache_key] = access_token
+            self.grantless_cache.clear()
+            self.grantless_cache[cache_key] = access_token
 
         return AccessTokenResponse(**access_token)
 
