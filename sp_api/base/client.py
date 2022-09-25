@@ -20,14 +20,13 @@ from sp_api.base.credential_provider import CredentialProvider
 
 log = logging.getLogger(__name__)
 
-role_cache = TTLCache(maxsize=int(os.environ.get('SP_API_AUTH_CACHE_SIZE', 10)), ttl=3200)
-
 
 class Client(BaseClient):
     boto3_client = None
     grantless_scope: str = ''
     keep_restricted_data_token: bool = False
     version = None
+    role_cache: TTLCache
 
     def __init__(
             self,
@@ -71,6 +70,7 @@ class Client(BaseClient):
         self.timeout = timeout
         self.version = version
         self.verify = verify
+        self.role_cache = TTLCache(maxsize=int(os.environ.get('SP_API_AUTH_CACHE_SIZE', 10)), ttl=3200)
 
     def _get_cache_key(self, token_flavor=''):
         return 'role_' + hashlib.md5(
@@ -82,7 +82,7 @@ class Client(BaseClient):
             RoleArn=self.credentials.role_arn,
             RoleSessionName='guid'
         )
-        role_cache[cache_key] = role
+        self.role_cache[cache_key] = role
         return role
 
     @property
@@ -109,7 +109,7 @@ class Client(BaseClient):
     def role(self):
         cache_key = self._get_cache_key()
         try:
-            role = role_cache[cache_key]
+            role = self.role_cache[cache_key]
         except KeyError:
             role = self.set_role(cache_key)
         return role.get('Credentials')
